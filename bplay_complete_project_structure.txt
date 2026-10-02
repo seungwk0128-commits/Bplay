@@ -1,0 +1,600 @@
+================================================================================
+Bplay Android App Complete Project Source
+================================================================================
+
+--------------------------------------------------------------------------------
+[FILE 1] settings.gradle
+--------------------------------------------------------------------------------
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOSITORIES)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+rootProject.name = "Bplay"
+include ':app'
+
+
+--------------------------------------------------------------------------------
+[FILE 2] build.gradle (Project Level)
+--------------------------------------------------------------------------------
+plugins {
+    id 'com.android.application' version '8.1.1' apply false
+    id 'org.jetbrains.kotlin.android' version '1.8.10' apply false
+}
+
+
+--------------------------------------------------------------------------------
+[FILE 3] app/build.gradle (Module Level)
+--------------------------------------------------------------------------------
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.seungw.bplay'
+    compileSdk 33
+
+    defaultConfig {
+        applicationId "com.seungw.bplay"
+        minSdk 24
+        targetSdk 33
+        versionCode 1
+        versionName "1.0"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.9.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.android.material:material:1.9.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+}
+
+
+--------------------------------------------------------------------------------
+[FILE 4] proguard-rules.pro
+--------------------------------------------------------------------------------
+# Bplay Obfuscation Rules by. SeungW
+-repackageclasses ''
+-allowaccessmodification
+-optimizations !code/simplification/arithmetic,!field/*,!class/merging/*
+
+-renamesourcefileattribute SourceFile
+-keepattributes SourceFile,LineNumberTable
+
+# 주요 로직 및 모델 난독화 강하게 처리
+-keep class com.seungw.bplay.MainActivity { *; }
+
+
+--------------------------------------------------------------------------------
+[FILE 5] app/src/main/AndroidManifest.xml
+--------------------------------------------------------------------------------
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.seungw.bplay">
+
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_MOCK_LOCATION" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="Bplay"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.MaterialComponents.DayNight.NoActionBar">
+        
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".GPSMockService"
+            android:enabled="true"
+            android:exported="false" />
+
+        <service
+            android:name=".FloatingOverlayService"
+            android:enabled="true"
+            android:exported="false" />
+    </application>
+
+</manifest>
+
+
+--------------------------------------------------------------------------------
+[FILE 6] app/src/main/java/com/seungw/bplay/DeviceCodeGenerator.kt
+--------------------------------------------------------------------------------
+package com.seungw.bplay
+
+import android.content.Context
+import android.provider.Settings
+import java.security.MessageDigest
+
+object DeviceCodeGenerator {
+    fun getFixedDeviceCode(context: Context): String {
+        val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: "BPLAYDEFAULT"
+        val bytes = MessageDigest.getInstance("SHA-256").digest(androidId.toByteArray())
+        
+        var letters = ""
+        var digits = ""
+        
+        for (b in bytes) {
+            val charVal = (b.toInt() and 0xFF)
+            if (letters.length < 4) {
+                val letter = ('A' + (charVal % 26))
+                letters += letter
+            } else if (digits.length < 4) {
+                val digit = (charVal % 10)
+                digits += digit
+            }
+            if (letters.length == 4 && digits.length == 4) break
+        }
+        
+        return "BPLAY-$letters$digits"
+    }
+}
+
+
+--------------------------------------------------------------------------------
+[FILE 7] app/src/main/java/com/seungw/bplay/DiscordWebhookManager.kt
+--------------------------------------------------------------------------------
+package com.seungw.bplay
+
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlin.concurrent.thread
+
+object DiscordWebhookManager {
+    // 제공해 주신 디스코드 웹후크 URL
+    private const val WEBHOOK_URL = "https://discord.com/api/webhooks/1555529835726766105/GGYgJQeBSDdwa6GdQi61BNNZpryI3ttfAOuW2dq9313sdvm3ZuM85Au5gYGjG3KY_hty"
+
+    fun sendApprovalRequest(deviceCode: String) {
+        thread {
+            try {
+                val url = URL(WEBHOOK_URL)
+                val conn = url.openConnection() as HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.doOutput = true
+
+                val jsonPayload = """
+                {
+                  "username": "Bplay Auth Bot",
+                  "embeds": [{
+                    "title": "🚨 새로운 Bplay 앱 승인 요청!",
+                    "color": 65280,
+                    "fields": [
+                      { "name": "기기 고유 코드", "value": "`$deviceCode`", "inline": true },
+                      { "name": "제작자", "value": "by. SeungW", "inline": true },
+                      { "name": "상태", "value": "⏳ 승인 대기 중...", "inline": false }
+                    ],
+                    "footer": { "text": "Bplay 관리자 인증 시스템" }
+                  }]
+                }
+                """.trimIndent()
+
+                val writer = OutputStreamWriter(conn.outputStream)
+                writer.write(jsonPayload)
+                writer.flush()
+                writer.close()
+                conn.responseCode
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+}
+
+
+--------------------------------------------------------------------------------
+[FILE 8] app/src/main/java/com/seungw/bplay/FloatingOverlayService.kt
+--------------------------------------------------------------------------------
+package com.seungw.bplay
+
+import android.app.Service
+import android.content.Intent
+import android.graphics.PixelFormat
+import android.os.Build
+import android.os.IBinder
+import android.view.Gravity
+import android.view.LayoutInflater
+import android.view.View
+import android.view.WindowManager
+import android.widget.Button
+import android.widget.TextView
+
+class FloatingOverlayService : Service() {
+    private lateinit var windowManager: WindowManager
+    private lateinit var overlayView: View
+
+    override fun onCreate() {
+        super.onCreate()
+        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        overlayView = LayoutInflater.from(this).inflate(R.layout.layout_floating_ui, null)
+
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else
+                WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 100
+            y = 100
+        }
+
+        windowManager.addView(overlayView, params)
+
+        // STOP 버튼 클릭 이벤트
+        overlayView.findViewById<Button>(R.id.btnStop).setOnClickListener {
+            val stopIntent = Intent(this, GPSMockService::class.java).apply { action = "ACTION_STOP" }
+            startService(stopIntent)
+            stopSelf()
+        }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val movedMeters = intent?.getDoubleExtra("MOVED", 0.0) ?: 0.0
+        val totalMeters = intent?.getDoubleExtra("TOTAL", 0.0) ?: 0.0
+        val percent = intent?.getIntExtra("PERCENT", 0) ?: 0
+
+        updateUI(movedMeters, totalMeters, percent)
+        return START_NOT_STICKY
+    }
+
+    private fun updateUI(movedMeters: Double, totalMeters: Double, percent: Int) {
+        val movedKm = String.format("%.2f", movedMeters / 1000)
+        val totalKm = String.format("%.2f", totalMeters / 1000)
+
+        overlayView.findViewById<TextView>(R.id.tvDistance).text = "$movedKm km / $totalKm km"
+        overlayView.findViewById<TextView>(R.id.tvPercent).text = "$percent%"
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (::overlayView.isInitialized) windowManager.removeView(overlayView)
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+}
+
+
+--------------------------------------------------------------------------------
+[FILE 9] app/src/main/java/com/seungw/bplay/GPSMockService.kt
+--------------------------------------------------------------------------------
+package com.seungw.bplay
+
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.location.Location
+import android.location.LocationManager
+import android.location.provider.ProviderProperties
+import android.os.Build
+import android.os.IBinder
+import android.os.SystemClock
+import kotlin.concurrent.thread
+
+class GPSMockService : Service() {
+    private var isRunning = false
+    private lateinit var locationManager: LocationManager
+
+    override fun onCreate() {
+        super.onCreate()
+        locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == "ACTION_STOP") {
+            isRunning = false
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        val startLat = intent?.getDoubleExtra("START_LAT", 37.5665) ?: 37.5665
+        val startLng = intent?.getDoubleExtra("START_LNG", 126.9780) ?: 126.9780
+        val targetLat = intent?.getDoubleExtra("TARGET_LAT", 37.5700) ?: 37.5700
+        val targetLng = intent?.getDoubleExtra("TARGET_LNG", 126.9800) ?: 126.9800
+        val speedKmH = intent?.getDoubleExtra("SPEED", 20.0) ?: 20.0
+
+        isRunning = true
+        startMocking(startLat, startLng, targetLat, targetLng, speedKmH)
+
+        return START_STICKY
+    }
+
+    private fun startMocking(startLat: Double, startLng: Double, targetLat: Double, targetLng: Double, speedKmH: Double) {
+        thread {
+            try {
+                val provider = LocationManager.GPS_PROVIDER
+                locationManager.addTestProvider(
+                    provider,
+                    false, false, false, false, true, true, true,
+                    ProviderProperties.POWER_USAGE_LOW,
+                    ProviderProperties.ACCURACY_FINE
+                )
+                locationManager.setTestProviderEnabled(provider, true)
+
+                val speedMps = speedKmH / 3.6
+                var currentLat = startLat
+                var currentLng = startLng
+
+                val results = FloatArray(1)
+                Location.distanceBetween(startLat, startLng, targetLat, targetLng, results)
+                val totalDistance = results[0].toDouble()
+                var movedDistance = 0.0
+
+                while (isRunning && movedDistance < totalDistance) {
+                    val mockLocation = Location(provider).apply {
+                        latitude = currentLat
+                        longitude = currentLng
+                        altitude = 3.0
+                        time = System.currentTimeMillis()
+                        accuracy = 1.0f
+                        elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
+                    }
+
+                    locationManager.setTestProviderLocation(provider, mockLocation)
+
+                    val ratio = (speedMps * 1.0) / totalDistance
+                    currentLat += (targetLat - startLat) * ratio
+                    currentLng += (targetLng - startLng) * ratio
+                    movedDistance += speedMps
+
+                    val percent = ((movedDistance / totalDistance) * 100).toInt().coerceAtMost(100)
+
+                    val overlayIntent = Intent(this, FloatingOverlayService::class.java).apply {
+                        putExtra("MOVED", movedDistance)
+                        putExtra("TOTAL", totalDistance)
+                        putExtra("PERCENT", percent)
+                    }
+                    startService(overlayIntent)
+
+                    Thread.sleep(1000)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        isRunning = false
+        try {
+            locationManager.removeTestProvider(LocationManager.GPS_PROVIDER)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+}
+
+
+--------------------------------------------------------------------------------
+[FILE 10] app/src/main/java/com/seungw/bplay/SecurityCheck.kt
+--------------------------------------------------------------------------------
+package com.seungw.bplay
+
+import android.content.Context
+import android.content.pm.ApplicationInfo
+
+object SecurityCheck {
+    fun isDebuggable(context: Context): Boolean {
+        return (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+    }
+}
+
+
+--------------------------------------------------------------------------------
+[FILE 11] app/src/main/java/com/seungw/bplay/MainActivity.kt
+--------------------------------------------------------------------------------
+package com.seungw.bplay
+
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.provider.Settings
+import android.widget.Button
+import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
+
+class MainActivity : AppCompatActivity() {
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate()
+        setContentView(R.layout.activity_main)
+
+        val tvDeviceCode = findViewById<TextView>(R.id.tvDeviceCode)
+        val btnStart = findViewById<Button>(R.id.btnStart)
+
+        // 기기 고유 코드 생성
+        val deviceCode = DeviceCodeGenerator.getFixedDeviceCode(this)
+        tvDeviceCode.text = "기기 코드: $deviceCode"
+
+        // 디스코드 웹후크 전송
+        DiscordWebhookManager.sendApprovalRequest(deviceCode)
+
+        checkOverlayPermission()
+
+        btnStart.setOnClickListener {
+            val intent = Intent(this, GPSMockService::class.java).apply {
+                putExtra("START_LAT", 37.5665)
+                putExtra("START_LNG", 126.9780)
+                putExtra("TARGET_LAT", 37.5700)
+                putExtra("TARGET_LNG", 126.9800)
+                putExtra("SPEED", 25.0)
+            }
+            startService(intent)
+            Toast.makeText(this, "모의 GPS 이동 시작! (by. SeungW)", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun checkOverlayPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
+            startActivityForResult(intent, 1234)
+        }
+    }
+}
+
+
+--------------------------------------------------------------------------------
+[FILE 12] app/src/main/res/layout/activity_main.xml
+--------------------------------------------------------------------------------
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#121212"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <TextView
+        android:id="@+id/tvTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Bplay"
+        android:textColor="#FFD700"
+        android:textSize="32sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/tvSub"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="30dp"
+        android:text="by. SeungW"
+        android:textColor="#AAAAAA"
+        android:textSize="14sp" />
+
+    <TextView
+        android:id="@+id/tvDeviceCode"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="20dp"
+        android:text="기기 코드 생성 중..."
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold" />
+
+    <Button
+        android:id="@+id/btnStart"
+        android:layout_width="match_parent"
+        android:layout_height="55dp"
+        android:backgroundTint="#FFD700"
+        android:text="[준비완료] GPS 이동 시작"
+        android:textColor="#000000"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+</LinearLayout>
+
+
+--------------------------------------------------------------------------------
+[FILE 13] app/src/main/res/layout/layout_floating_ui.xml
+--------------------------------------------------------------------------------
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:background="#CC000000"
+    android:orientation="vertical"
+    android:padding="10dp">
+
+    <TextView
+        android:id="@+id/tvBrand"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Bplay (by. SeungW)"
+        android:textColor="#FFD700"
+        android:textSize="10sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/tvDistance"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="0.00 km / 0.00 km"
+        android:textColor="#FFFFFF"
+        android:textSize="13sp" />
+
+    <TextView
+        android:id="@+id/tvPercent"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="0%"
+        android:textColor="#00FF00"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <Button
+        android:id="@+id/btnStop"
+        android:layout_width="wrap_content"
+        android:layout_height="32dp"
+        android:layout_marginTop="4dp"
+        android:backgroundTint="#FF4444"
+        android:text="STOP"
+        android:textColor="#FFFFFF"
+        android:textSize="11sp" />
+</LinearLayout>
+
+
+--------------------------------------------------------------------------------
+[FILE 14] app/src/main/res/values/strings.xml
+--------------------------------------------------------------------------------
+<resources>
+    <string name="app_name">Bplay</string>
+</resources>
